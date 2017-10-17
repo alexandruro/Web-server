@@ -40,6 +40,7 @@ service_client_socket (const int s, const char *const tag) {
     /* special case for tidy printing: if the last two characters are
        \r\n or the last character is \n, zap them so that the newline
        following the quotes is the only one. */
+       /*
     if (bytes >= 1 && buffer[bytes - 1] == '\n') {
       if (bytes >= 2 && buffer[bytes - 2] == '\r') {
 	strcpy (buffer + bytes - 2, "..");
@@ -47,12 +48,53 @@ service_client_socket (const int s, const char *const tag) {
 	strcpy (buffer + bytes - 1, ".");
       }
     }
+    */
     
 #if (__SIZE_WIDTH__ == 64 || __SIZEOF_POINTER__ == 8)
     printf ("echoed %ld bytes back to %s, \"%s\"\n", bytes, tag, buffer);
 #else
     printf ("echoed %d bytes back to %s, \"%s\"\n", bytes, tag, buffer);
 #endif
+	
+	char * line;
+	char *saveptrline;
+	line = strtok_r(buffer,"\r\n",&saveptrline);
+	int lineCount=0;
+	while (line!=NULL)
+	{
+		char * word;
+		char *saveptrword;
+		word = strtok_r(line," ",&saveptrword);
+		int wordCount = 0;
+		while (word!=NULL)
+		{
+			
+			if(lineCount==0) {
+			// expect Request-line
+				if(wordCount==0) {
+					// expect Method
+					if(!strcmp(word, "GET"))
+						printf("Method known: GET\n");
+					else 
+						printf("Method unknown: %s\n", word);
+				}
+			}
+			
+			
+			word = strtok_r(NULL, " ",&saveptrword);
+			wordCount++;
+			
+		}
+	
+		
+		
+		
+		line = strtok_r(NULL, "\r\n", &saveptrline);
+		lineCount++;
+	}
+
+		
+	
   }
   /* bytes == 0: orderly close; bytes < 0: something went wrong */
   if (bytes != 0) {

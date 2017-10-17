@@ -109,3 +109,5 @@ Response      = Status-Line
 Status-Line = HTTP-Version SP Status-Code SP Reason-Phrase CRLF
 
 
+The strtok() function uses a static buffer while parsing, so it's not thread safe. Use strtok_r() if this matters to you
+
