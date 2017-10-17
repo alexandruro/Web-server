@@ -61,3 +61,51 @@ Threads can access
 Fork 
 	- child processes are isolated (good - security, bad - co-operation
 	- child processes can drop privilege (child threads not) - Security
+	
+	
+HTTP request examples
+
+GET / HTTP/1.1
+User-Agent: Wget/1.14 (linux-gnu)
+Accept: */*
+Host: localhost:4444
+Connection: Keep-Alive
+
+GET / HTTP/1.1
+User-Agent: curl/7.29.0
+Host: localhost:4444
+Accept: */*
+
+GET /index.html HTTP/1.1           	<- request-line
+User-Agent: Wget/1.14 (linux-gnu)    	<- request-header
+Accept: */*				<- request-header
+Host: localhost:4444			<- request-header
+Connection: Keep-Alive			<- request-header
+
+
+Request       = 
+	Request-Line
+	*(( general-header
+	| request-header
+	| entity-header ) CRLF)
+	CRLF
+	[ message-body ]
+	
+Request-Line   = Method SP Request-URI SP HTTP-Version CRLF
+Request-URI    = "*" | absoluteURI | abs_path | authority
+HTTP-Version   = "HTTP" "/" 1*DIGIT "." 1*DIGIT
+http_URL = "http:" "//" host [ ":" port ] [ abs_path [ "?" query ]]
+message-header = field-name ":" [ field-value ]
+
+
+
+Response      = Status-Line
+                       *(( general-header
+                        | response-header
+                        | entity-header ) CRLF)
+                       CRLF
+                       [ message-body ]
+
+Status-Line = HTTP-Version SP Status-Code SP Reason-Phrase CRLF
+
+
