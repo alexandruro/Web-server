@@ -1,0 +1,63 @@
+# Sockets
+
+* Socket() - creates a single end of a network connection
+
+int socket(int domain, int type, int protocol);
+
+domain = { PF_UNIX, PF_INET, PF_INET6, .. }
+	AF_INET tells the Socket API it doesn't care which (IPv4, IPv6) to use.
+	
+for server: socket bound to INADDR_ANY or in6addr_any (s =socket(), bind(s))
+	listen(s, backlog)
+	backlog = 5, no-one knows why
+	while(1) {
+		ns = accept() -> new socket, with the old one still listening 
+				-> &size, so it will contain the size of the result afterwards
+				-> tells who called, can also use getpeername()
+		fork()
+		*child* - close(s); while(1) { read(ns), write(ns)} close(ns)
+		*parent* - close(ns);
+	can use getsockname() to find out your own name if you forgotten
+	
+for server :
+	- s = socket(..)
+	- bind(s)
+	- connect(s)
+	- while(1) { read(s) or write(s) }
+	- close(s) or shutdown(s)
+	
+
+* Bind() - associates the socket with some addressing info
+
+int bind(int s, const struct sockaddr *name, socklen_t namelen);
+
+you put protocol specific information here
+
+
+
+* To get address: use getaddrinfo() instead of gethostbyname()
+
+
+
+# Threading
+
+Old school
+
+fork() - makes a copy of process, leaves both of them running
+	- returns -> process id for parent
+	 	  -> 0 for the child
+NEVER USE vfork()	 	  
+	 	
+New school
+
+pthread_create(&pthread_t, 0, &client_thread, (void *) tcb_p)
+	if this !=0 -> error
+	
+Threads can access
+	- global variables (maybe need mutex)
+	- variables on their own stack 
+	- malloc'd space by another thread (--//--)
+	
+Fork 
+	- child processes are isolated (good - security, bad - co-operation
+	- child processes can drop privilege (child threads not) - Security
