@@ -15,94 +15,162 @@
 
 #include "service_client_socket.h"
 
-/* why can I not use const size_t here? */
 #define buffer_size 1024
+#define max_path_size 200
 
-int
-service_client_socket (const int s, const char *const tag) {
-  char buffer[buffer_size];
-  size_t bytes;
-
-  printf ("new connection from %s\n", tag);
-
-  /* repeatedly read a buffer load of bytes, leaving room for the
-     terminating NUL we want to add to make using printf() possible */
-  while ((bytes = read (s, buffer, buffer_size - 1)) > 0) {
-    /* this code is not quite complete: a write can in this context be
-       partial and return 0<x<bytes.  realistically you don't need to
-       deal with this case unless you are writing multiple megabytes */
-    if (write (s, buffer, bytes) != bytes) {
-      perror ("write");
-      return -1;
-    }
-    /* NUL-terminal the string */
-    buffer[bytes] = '\0';
-    /* special case for tidy printing: if the last two characters are
-       \r\n or the last character is \n, zap them so that the newline
-       following the quotes is the only one. */
-       /*
-    if (bytes >= 1 && buffer[bytes - 1] == '\n') {
-      if (bytes >= 2 && buffer[bytes - 2] == '\r') {
-	strcpy (buffer + bytes - 2, "..");
-      } else {
-	strcpy (buffer + bytes - 1, ".");
-      }
-    }
-    */
-    
-#if (__SIZE_WIDTH__ == 64 || __SIZEOF_POINTER__ == 8)
-    printf ("echoed %ld bytes back to %s, \"%s\"\n", bytes, tag, buffer);
-#else
-    printf ("echoed %d bytes back to %s, \"%s\"\n", bytes, tag, buffer);
-#endif
+char* str(int val){
+	static char buf[32] = {0};
+	int i = 30;
+	for(; val && i ; --i, val /= 10)
+		buf[i] = "0123456789abcdef"[val % 10];
 	
-	char * line;
-	char *saveptrline;
-	line = strtok_r(buffer,"\r\n",&saveptrline);
-	int lineCount=0;
-	while (line!=NULL)
+	return &buf[i+1];
+}
+
+enum method { GET, OTHER };
+
+int service_client_socket (const int s, const char *const tag) {
+
+ 	char buffer[buffer_size];
+ 	size_t bytes;
+
+ 	char base_path[] = "html";
+	char default_path[] = "/index.html";
+	char path_404[] = "/404.html";
+
+ 	printf ("new connection from %s\n", tag);
+
+ 	// repeatedly read a buffer load of bytes
+ 	while ((bytes = read (s, buffer, buffer_size)) > 0) 
 	{
-		char * word;
-		char *saveptrword;
-		word = strtok_r(line," ",&saveptrword);
-		int wordCount = 0;
-		while (word!=NULL)
+
+	
+		#if (__SIZE_WIDTH__ == 64 || __SIZEOF_POINTER__ == 8)
+		printf ("Got %ld bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
+		#else
+		printf ("Got %d bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
+		#endif
+		
+		enum method method;
+		char path[max_path_size];
+
+		// Split the request into lines
+		char *line, *saveptrline;
+		line = strtok_r(buffer,"\r\n",&saveptrline);
+		int line_count=0;
+		while (line!=NULL)
 		{
-			
-			if(lineCount==0) {
-			// expect Request-line
-				if(wordCount==0) {
-					// expect Method
-					if(!strcmp(word, "GET"))
-						printf("Method known: GET\n");
-					else 
-						printf("Method unknown: %s\n", word);
-				}
+
+			// Split the line into words
+			char *word, *saveptrword;
+			word = strtok_r(line," ",&saveptrword);
+			int word_count = 0;
+			while (word!=NULL) {
+				
+				if(line_count==0) {
+				// expect Request-line
+					
+					switch(word_count) 
+					{
+						case 0: // expect Method
+							if(!strcmp(word, "GET"))
+								method = GET;
+							else 
+								method = OTHER;
+							break;
+						case 1: // expect Request-URI
+							if(!strcmp(word, "/")) {
+								strcpy(path, base_path);
+								strcat(path, default_path);
+							}
+							else if(word[0]=='/') { // expect relative path
+									strcpy(path, base_path);
+									strcat(path, word);
+							}
+							break;
+					}
+
+				}	
+				
+				word = strtok_r(NULL, " ",&saveptrword);
+				word_count++;
+				
 			}
 			
-			
-			word = strtok_r(NULL, " ",&saveptrword);
-			wordCount++;
+			line = strtok_r(NULL, "\r\n", &saveptrline);
+			line_count++;
+		}   
+
+		if(method == GET)
+		{
+			// Prepare message body
+			char message_body[buffer_size] = "\0";
+			char read_line[buffer_size];
+			char response[buffer_size];
+
+
+			FILE* fp;
+			fp = fopen(path, "r");
+			if(fp==NULL) {
+				perror("can't open file");
+				strcpy(response, "HTTP/1.1 404 Not Found\n"
+								"Date: Sun, 18 Oct 2012 10:36:20 GMT\n"
+								"Server: Apache/2.2.14 (Win32)\n"
+								"Connection: Closed\n"
+								"Content-Type: text/html; charset=iso-8859-1\n"
+								"Content-Length: ");
+				strcpy(path, base_path);
+				strcat(path, path_404);
+				fclose(fp);
+				fp = fopen(path, "r");
+			}
+			else {
+
+				// Prepare status-line and headers
+				strcpy(response, 
+					"HTTP/1.1 200 OK\n"
+					//"Date: Thu, 19 Feb 2009 12:27:04 GMT\n"
+					//"Server: Apache/2.2.3\n"
+					//"Last-Modified: Wed, 18 Jun 2003 16:05:58 GMT\n"
+					//"ETag: \"56d-9989200-1132c580\"\n"
+					"Content-Type: text/html\n"
+					"Accept-Ranges: bytes\n"
+					"Connection: close\n"
+					"Content-Length: ");				
+
+			}
+
+			perror(path);
+			perror("ok, here");
+			while (fgets(read_line, buffer_size, fp)) {
+				strcat(message_body, read_line);
+			}
+
+			// Append content-length value to the header
+			strcat(response, str(strlen(message_body)));
+			strcat(response, "\n\n");
+
+			// Append message body to the 
+			strcat(response, message_body);
+
+			if (write (s, response, strlen(response)) != bytes) {
+				perror ("write");
+				return -1;
+			}
 			
 		}
+
 	
-		
-		
-		
-		line = strtok_r(NULL, "\r\n", &saveptrline);
-		lineCount++;
 	}
 
-		
-	
-  }
-  /* bytes == 0: orderly close; bytes < 0: something went wrong */
-  if (bytes != 0) {
-    perror ("read");
-    return -1;
-  }
-  printf ("connection from %s closed\n", tag);
-  close (s);
-  return 0;
+
+	/* bytes == 0: orderly close; bytes < 0: something went wrong */
+	if (bytes != 0) {
+		perror ("read");
+		return -1;
+	}
+	printf ("connection from %s closed\n", tag);
+	close (s);
+	return 0;
 }
 
