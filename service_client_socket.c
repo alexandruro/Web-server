@@ -46,9 +46,11 @@ int service_client_socket (const int s, const char *const tag) {
 
 	
 		#if (__SIZE_WIDTH__ == 64 || __SIZEOF_POINTER__ == 8)
-		printf ("Got %ld bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
+		//printf ("Got %ld bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
+		printf ("Got %ld bytes from %s.\n", bytes, tag);
 		#else
-		printf ("Got %d bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
+		printf ("Got %d bytes from %s.\n", bytes, tag);
+		//printf ("Got %d bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
 		#endif
 		
 		enum method method;
@@ -69,7 +71,6 @@ int service_client_socket (const int s, const char *const tag) {
 				
 				if(line_count==0) {
 				// expect Request-line
-					
 					switch(word_count) 
 					{
 						case 0: // expect Method
@@ -87,6 +88,7 @@ int service_client_socket (const int s, const char *const tag) {
 									strcpy(path, base_path);
 									strcat(path, word);
 							}
+							printf("Request: %s\n", word);
 							break;
 					}
 
@@ -111,17 +113,20 @@ int service_client_socket (const int s, const char *const tag) {
 
 			FILE* fp;
 			fp = fopen(path, "r");
+			char path[max_path_size];
 			if(fp==NULL) {
 				perror("can't open file");
+				errno = 0;
 				strcpy(response, "HTTP/1.1 404 Not Found\n"
 								"Date: Sun, 18 Oct 2012 10:36:20 GMT\n"
 								"Server: Apache/2.2.14 (Win32)\n"
-								"Connection: Closed\n"
+								//"Connection: close\n"
 								"Content-Type: text/html; charset=iso-8859-1\n"
 								"Content-Length: ");
+				
 				strcpy(path, base_path);
 				strcat(path, path_404);
-				fclose(fp);
+				//fclose(fp);
 				fp = fopen(path, "r");
 			}
 			else {
@@ -135,13 +140,11 @@ int service_client_socket (const int s, const char *const tag) {
 					//"ETag: \"56d-9989200-1132c580\"\n"
 					"Content-Type: text/html\n"
 					"Accept-Ranges: bytes\n"
-					"Connection: close\n"
+					//"Connection: close\n"
 					"Content-Length: ");				
 
 			}
 
-			perror(path);
-			perror("ok, here");
 			while (fgets(read_line, buffer_size, fp)) {
 				strcat(message_body, read_line);
 			}
@@ -153,7 +156,7 @@ int service_client_socket (const int s, const char *const tag) {
 			// Append message body to the 
 			strcat(response, message_body);
 
-			if (write (s, response, strlen(response)) != bytes) {
+			if (write (s, response, strlen(response)) != strlen(response)) {
 				perror ("write");
 				return -1;
 			}
