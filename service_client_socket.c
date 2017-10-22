@@ -12,6 +12,7 @@
 #include <arpa/inet.h>
 
 #include <assert.h>
+#include <ctype.h>
 
 #include "service_client_socket.h"
 
@@ -27,153 +28,204 @@ char* str(int val){
 	return &buf[i+1];
 }
 
-enum method { GET, OTHER };
+short str_is_digit(char* chr) {
+    int i;
+    for (i = 0; i < strlen(chr); i++)
+        if (!isdigit(chr[i]))
+            return 0;
+    return 1;
+}
+
+enum method { GET, HEAD, OTHER };
+
+
+int parse_request(char *buffer, enum method *method, char* path, FILE** fp) {
+
+    char base_path[] = "html";
+    char default_path[] = "index.html";
+    char path_404[] = "/404.html";
+
+    // Split the request into lines
+    char *line, *saveptrline;
+    line = strtok_r(buffer,"\r\n",&saveptrline);
+    int line_count=0;
+    char* first_line[3];
+    while (line!=NULL)
+    {
+
+        // Split the line into words
+        char *word, *saveptrword;
+        word = strtok_r(line," ",&saveptrword);
+        int word_count = 0;
+        while (word!=NULL) {
+            if(line_count==0) {
+                if (word_count >= 3)
+                    return 400;
+                else first_line[word_count] = word;
+            }
+
+            word = strtok_r(NULL, " ",&saveptrword);
+            word_count++;
+
+        }
+
+        if(line_count==0 && word_count!=3)
+            return 400;
+
+        line = strtok_r(NULL, "\r\n", &saveptrline);
+        line_count++;
+    }
+
+    // parse Request-line
+
+    // Parse http version
+    char *version = first_line[2];
+    if (!strncmp(version,"HTTP/", 5)) {
+        // Check syntax
+        char *dot = strchr(version, '.');
+        if (!dot)
+            return 400;
+
+        char digit1[5], digit2[5];
+        strncpy(digit1, version+ 5, dot - version - 5);
+        char *end = digit1 + (dot - version - 4);
+        *end = '\0';
+        strcpy(digit2, dot + 1);
+        if (!str_is_digit(digit1) || !str_is_digit(digit2))
+            return 400;
+
+        // Check version
+        printf("\n%s\n", version+5);
+        if (strcmp(version + 5, "1.1")!=0)
+            return 505;
+    }
+    else return 400;
+
+    // parse method
+    //char* meth = first_line[0];
+    if (!strcmp(first_line[0],"GET"))
+        *method = GET;
+    else if (!strcmp(first_line[0],"HEAD"))
+        *method = HEAD;
+    else {
+        *method = OTHER;
+        return 501; // Not Implemented
+    }
+
+    // parse Request-URI
+    //char *uri = first_line[1];
+    if (first_line[1][0] != '/') // Request must start with '/'
+        return 400;
+    if (first_line[1][strlen(first_line[1]) - 1] == '/') { // look for index.html in the specified folder
+        strcpy(path, base_path);
+        strcat(path, first_line[1]);
+        strcat(path, default_path);
+    } else { // look for file
+        strcpy(path, base_path);
+        strcat(path, first_line[1]);
+    }
+    printf("Request: %s\n", first_line[1]);
+
+    // Try to get the resource
+    *fp = fopen(path, "r");
+    if(!*fp) {
+        perror("can't open file");
+        errno = 0;
+
+        strcpy(path, base_path);
+        strcat(path, path_404);
+        //fclose(fp);
+        *fp = fopen(path, "r");
+        if(!*fp)
+            return 500; // can't find 404.html, which should not happen
+    }
+
+    return 200;
+
+}
 
 int service_client_socket (const int s, const char *const tag) {
 
- 	char buffer[buffer_size];
- 	size_t bytes;
-
- 	char base_path[] = "html";
-	char default_path[] = "/index.html";
-	char path_404[] = "/404.html";
-
- 	printf ("new connection from %s\n", tag);
-
- 	// repeatedly read a buffer load of bytes
- 	while ((bytes = read (s, buffer, buffer_size)) > 0) 
-	{
-
-	
-		#if (__SIZE_WIDTH__ == 64 || __SIZEOF_POINTER__ == 8)
-		//printf ("Got %ld bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
-		printf ("Got %ld bytes from %s.\n", bytes, tag);
-		#else
-		printf ("Got %d bytes from %s.\n", bytes, tag);
-		//printf ("Got %d bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
-		#endif
-		
-		enum method method;
-		char path[max_path_size];
-
-		// Split the request into lines
-		char *line, *saveptrline;
-		line = strtok_r(buffer,"\r\n",&saveptrline);
-		int line_count=0;
-		while (line!=NULL)
-		{
-
-			// Split the line into words
-			char *word, *saveptrword;
-			word = strtok_r(line," ",&saveptrword);
-			int word_count = 0;
-			while (word!=NULL) {
-				
-				if(line_count==0) {
-				// expect Request-line
-					switch(word_count) 
-					{
-						case 0: // expect Method
-							if(!strcmp(word, "GET"))
-								method = GET;
-							else 
-								method = OTHER;
-							break;
-						case 1: // expect Request-URI
-							if(!strcmp(word, "/")) {
-								strcpy(path, base_path);
-								strcat(path, default_path);
-							}
-							else if(word[0]=='/') { // expect relative path
-									strcpy(path, base_path);
-									strcat(path, word);
-							}
-							printf("Request: %s\n", word);
-							break;
-					}
-
-				}	
-				
-				word = strtok_r(NULL, " ",&saveptrword);
-				word_count++;
-				
-			}
-			
-			line = strtok_r(NULL, "\r\n", &saveptrline);
-			line_count++;
-		}   
-
-		if(method == GET)
-		{
-			// Prepare message body
-			char message_body[buffer_size] = "\0";
-			char read_line[buffer_size];
-			char response[buffer_size];
+    char buffer[buffer_size];
+    size_t bytes;
 
 
-			FILE* fp;
-			fp = fopen(path, "r");
-			char path[max_path_size];
-			if(fp==NULL) {
-				perror("can't open file");
-				errno = 0;
-				strcpy(response, "HTTP/1.1 404 Not Found\n"
-								"Date: Sun, 18 Oct 2012 10:36:20 GMT\n"
-								"Server: Apache/2.2.14 (Win32)\n"
-								//"Connection: close\n"
-								"Content-Type: text/html; charset=iso-8859-1\n"
-								"Content-Length: ");
-				
-				strcpy(path, base_path);
-				strcat(path, path_404);
-				//fclose(fp);
-				fp = fopen(path, "r");
-			}
-			else {
+    printf("new connection from %s\n", tag);
 
-				// Prepare status-line and headers
-				strcpy(response, 
-					"HTTP/1.1 200 OK\n"
-					//"Date: Thu, 19 Feb 2009 12:27:04 GMT\n"
-					//"Server: Apache/2.2.3\n"
-					//"Last-Modified: Wed, 18 Jun 2003 16:05:58 GMT\n"
-					//"ETag: \"56d-9989200-1132c580\"\n"
-					"Content-Type: text/html\n"
-					"Accept-Ranges: bytes\n"
-					//"Connection: close\n"
-					"Content-Length: ");				
-
-			}
-
-			while (fgets(read_line, buffer_size, fp)) {
-				strcat(message_body, read_line);
-			}
-
-			// Append content-length value to the header
-			strcat(response, str(strlen(message_body)));
-			strcat(response, "\n\n");
-
-			// Append message body to the 
-			strcat(response, message_body);
-
-			if (write (s, response, strlen(response)) != strlen(response)) {
-				perror ("write");
-				return -1;
-			}
-			
-		}
-
-	
-	}
+    // repeatedly read a buffer load of bytes
+    while ((bytes = read(s, buffer, buffer_size)) > 0) {
 
 
-	/* bytes == 0: orderly close; bytes < 0: something went wrong */
-	if (bytes != 0) {
-		perror ("read");
-		return -1;
-	}
-	printf ("connection from %s closed\n", tag);
-	close (s);
-	return 0;
+#if (__SIZE_WIDTH__ == 64 || __SIZEOF_POINTER__ == 8)
+        //printf("Got %ld bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
+        //printf ("Got %ld bytes from %s.\n", bytes, tag);
+#else
+        printf ("Got %d bytes from %s.\n", bytes, tag);
+        //printf ("Got %d bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
+#endif
+
+
+        char path[max_path_size];
+        enum method method;
+        FILE *fp;
+
+        int code = parse_request(buffer, &method, path, &fp);
+
+        printf("Path: %s\n", path);
+
+        // Prepare response
+        char message_body[buffer_size] = "\0";
+        char read_line[buffer_size];
+        char response[buffer_size];
+
+        switch (code) {
+
+            case 200:
+                // Prepare status-line and headers
+                strcpy(response, "HTTP/1.1 200 OK\n"
+                        //"Content-Type: text/html\n"
+                        //"Connection: close\n"
+                        "Content-Length: ");
+                break;
+            case 404:
+                strcpy(response, "HTTP/1.1 404 Not Found\n"
+                        //"Connection: close\n"
+                        //"Content-Type: text/html\n"
+                        "Content-Length: ");
+                break;
+            default:
+                printf("%d\n", code);
+                return -1;
+
+        }
+
+        if (method == GET)
+            while (fgets(read_line, buffer_size, fp)) {
+                strcat(message_body, read_line);
+            }
+
+        // Append content-length value to the header
+        strcat(response, str(strlen(message_body)));
+        strcat(response, "\n\n");
+
+        // Append message body to the response
+        strcat(response, message_body);
+
+        if (write(s, response, strlen(response)) != strlen(response)) {
+            perror("write");
+            return -1;
+        }
+
+    }
+
+    /* bytes == 0: orderly close; bytes < 0: something went wrong */
+    if (bytes != 0) {
+        perror("read");
+        return -1;
+    }
+    printf("connection from %s closed\n", tag);
+    close(s);
+    return 0;
+
 }
 
