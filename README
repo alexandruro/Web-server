@@ -43,3 +43,8 @@ $ wget localhost:4444
 
 - Illegal or incomprehensible URLs should be flagged and rejected with an appropriate error,
 - The program should handle arbitrary-length inputs correctly. (use https://stackoverflow.com/questions/238603/how-can-i-get-a-files-size-in-cfor long files)
+
+Extensions:
+- compression
+- encryption with SSL
+- the ability to fetch byte-ranges of resources.
