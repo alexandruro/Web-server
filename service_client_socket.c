@@ -20,6 +20,8 @@
 #define max_path_size 200
 
 char* str(int val){
+    if(val==0)
+        return "0\0";
 	static char buf[32] = {0};
 	int i = 30;
 	for(; val && i ; --i, val /= 10)
@@ -95,7 +97,6 @@ int parse_request(char *buffer, enum method *method, char* path, FILE** fp) {
             return 400;
 
         // Check version
-        printf("\n%s\n", version+5);
         if (strcmp(version + 5, "1.1")!=0)
             return 505;
     }
@@ -138,6 +139,7 @@ int parse_request(char *buffer, enum method *method, char* path, FILE** fp) {
         *fp = fopen(path, "r");
         if(!*fp)
             return 500; // can't find 404.html, which should not happen
+        return 404;
     }
 
     return 200;
@@ -165,13 +167,11 @@ int service_client_socket (const int s, const char *const tag) {
 #endif
 
 
-        char path[max_path_size];
-        enum method method;
+        char path[max_path_size] = "\0";
+        enum method method = OTHER;
         FILE *fp;
 
         int code = parse_request(buffer, &method, path, &fp);
-
-        printf("Path: %s\n", path);
 
         // Prepare response
         char message_body[buffer_size] = "\0";
@@ -185,19 +185,34 @@ int service_client_socket (const int s, const char *const tag) {
                 strcpy(response, "HTTP/1.1 200 OK\n"
                         //"Content-Type: text/html\n"
                         //"Connection: close\n"
-                        "Content-Length: ");
+                        );
+                break;
+            case 400:
+                strcpy(response, "HTTP/1.1 400 Bad Request\n");
                 break;
             case 404:
                 strcpy(response, "HTTP/1.1 404 Not Found\n"
                         //"Connection: close\n"
                         //"Content-Type: text/html\n"
-                        "Content-Length: ");
+                        );
                 break;
+            case 500:
+                strcpy(response, "HTTP/1.1 500 Internal Server Error\n");
+                break;
+            case 501:
+                strcpy(response, "HTTP/1.1 501 Not Implemented\n");
+                break;
+            case 505:
+                strcpy(response, "HTTP/1.1 505 HTTP Version Not Supported\n");
+                break;
+
             default:
                 printf("%d\n", code);
                 return -1;
 
         }
+
+        strcat(response, "Content-Length: ");
 
         if (method == GET)
             while (fgets(read_line, buffer_size, fp)) {
@@ -205,7 +220,7 @@ int service_client_socket (const int s, const char *const tag) {
             }
 
         // Append content-length value to the header
-        strcat(response, str(strlen(message_body)));
+        strcat(response, str((int)strlen(message_body)));
         strcat(response, "\n\n");
 
         // Append message body to the response
