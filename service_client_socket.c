@@ -56,7 +56,7 @@ int parse_request(char *buffer, enum method *method, char* path, FILE** fp) {
     {
 
         // Split the line into words
-        char *word, *saveptrword;
+        char *word="\0", *saveptrword="\0";
         word = strtok_r(line," ",&saveptrword);
         int word_count = 0;
         while (word!=NULL) {
@@ -103,10 +103,10 @@ int parse_request(char *buffer, enum method *method, char* path, FILE** fp) {
     else return 400;
 
     // parse method
-    //char* meth = first_line[0];
-    if (!strcmp(first_line[0],"GET"))
+    char* meth = first_line[0];
+    if (!strcmp(meth,"GET"))
         *method = GET;
-    else if (!strcmp(first_line[0],"HEAD"))
+    else if (!strcmp(meth,"HEAD"))
         *method = HEAD;
     else {
         *method = OTHER;
@@ -114,18 +114,18 @@ int parse_request(char *buffer, enum method *method, char* path, FILE** fp) {
     }
 
     // parse Request-URI
-    //char *uri = first_line[1];
-    if (first_line[1][0] != '/') // Request must start with '/'
+    char *uri = first_line[1];
+    if (uri[0] != '/') // Request must start with '/'
         return 400;
-    if (first_line[1][strlen(first_line[1]) - 1] == '/') { // look for index.html in the specified folder
+    if (uri[strlen(uri) - 1] == '/') { // look for index.html in the specified folder
         strcpy(path, base_path);
-        strcat(path, first_line[1]);
+        strcat(path, uri);
         strcat(path, default_path);
     } else { // look for file
         strcpy(path, base_path);
-        strcat(path, first_line[1]);
+        strcat(path, uri);
     }
-    printf("Request: %s\n", first_line[1]);
+    printf("Request: %s\n", uri);
 
     // Try to get the resource
     *fp = fopen(path, "r");
@@ -135,7 +135,6 @@ int parse_request(char *buffer, enum method *method, char* path, FILE** fp) {
 
         strcpy(path, base_path);
         strcat(path, path_404);
-        //fclose(fp);
         *fp = fopen(path, "r");
         if(!*fp)
             return 500; // can't find 404.html, which should not happen
@@ -218,6 +217,9 @@ int service_client_socket (const int s, const char *const tag) {
             while (fgets(read_line, buffer_size, fp)) {
                 strcat(message_body, read_line);
             }
+
+        if(fp!=NULL)
+            fclose(fp);
 
         // Append content-length value to the header
         strcat(response, str((int)strlen(message_body)));
