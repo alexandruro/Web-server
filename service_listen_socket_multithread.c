@@ -20,9 +20,9 @@
 #include "make_printable_address.h"
 
 typedef struct thread_control_block {
-  int client;
-  struct sockaddr_in6 their_address;
-  socklen_t their_address_size;
+    int client;
+    struct sockaddr_in6 their_address;
+    socklen_t their_address_size;
 } thread_control_block_t;
 
 
@@ -35,8 +35,8 @@ client_thread (void *data) {
   assert (tcb_p->their_address_size == sizeof (tcb_p->their_address));
 
   printable = make_printable_address (&(tcb_p->their_address),
-				      tcb_p->their_address_size,
-				      buffer, sizeof (buffer));
+                                      tcb_p->their_address_size,
+                                      buffer, sizeof (buffer));
   (void) service_client_socket (tcb_p->client, printable);
   free (printable);		/* this was strdup'd */
   free (data);			/* this was malloc'd */
@@ -62,7 +62,7 @@ service_listen_socket (const int s) {
        is not known to belong exclusively to the thread must be locked
        when it is being accessed, which is outside the scope of this
        example.  */
-    
+
     thread_control_block_t *tcb_p = malloc (sizeof (*tcb_p));
 
     if (tcb_p == 0) {
@@ -76,7 +76,7 @@ service_listen_socket (const int s) {
        thread control block, rather than onto our own stack,
        because...[1] */
     if ((tcb_p->client = accept (s, (struct sockaddr *) &(tcb_p->their_address),
-				 &(tcb_p->their_address_size))) < 0) {
+                                 &(tcb_p->their_address_size))) < 0) {
       perror ("accept");
       /* may as well carry on, this is probably temporary */
     } else {
@@ -88,14 +88,18 @@ service_listen_socket (const int s) {
 	 pointer to that, then there would be some exciting race
 	 conditions as it was destroyed (or not) before the created
 	 thread finished using it. */
-    
+
       if (pthread_create (&thread, 0, &client_thread, (void *) tcb_p) != 0) {
-	perror ("pthread_create");
-	goto error_exit;	/* avoid break here in case of the later
+        perror ("pthread_create");
+        goto error_exit;	/* avoid break here in case of the later
 				   addition of an enclosing loop */
+      }
+      int error = pthread_detach (thread);
+      if (error != 0) {
+        fprintf (stderr, "pthread_detach failed %s, continuing\n", strerror (error));
       }
     }
   }
- error_exit:
+    error_exit:
   return -1;
 }
