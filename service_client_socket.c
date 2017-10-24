@@ -90,7 +90,7 @@ int parse_request(char *buffer, enum method *method, char* path, FILE** fp) {
 
         char digit1[5], digit2[5];
         strncpy(digit1, version+ 5, dot - version - 5);
-        char *end = digit1 + (dot - version - 4);
+        char *end = digit1 + (dot - version - 5);
         *end = '\0';
         strcpy(digit2, dot + 1);
         if (!str_is_digit(digit1) || !str_is_digit(digit2))
@@ -161,7 +161,7 @@ int service_client_socket (const int s, const char *const tag) {
         //printf("Got %ld bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
         //printf ("Got %ld bytes from %s.\n", bytes, tag);
 #else
-        printf ("Got %d bytes from %s.\n", bytes, tag);
+        //printf ("Got %d bytes from %s.\n", bytes, tag);
         //printf ("Got %d bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
 #endif
 
@@ -218,8 +218,8 @@ int service_client_socket (const int s, const char *const tag) {
                 strcat(message_body, read_line);
             }
 
-        if(fp!=NULL)
-            fclose(fp);
+        //if(fp!=NULL)
+        //    fclose(fp);
 
         // Append content-length value to the header
         strcat(response, str((int)strlen(message_body)));
@@ -232,6 +232,7 @@ int service_client_socket (const int s, const char *const tag) {
             perror("write");
             return -1;
         }
+        
 
     }
 
