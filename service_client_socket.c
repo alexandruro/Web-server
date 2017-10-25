@@ -8,18 +8,20 @@
 #include <string.h>
 
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #include <assert.h>
 #include <ctype.h>
+#include <sys/fcntl.h>
 
 #include "service_client_socket.h"
 
 #define buffer_size 1024
 #define max_path_size 200
 
-char* str(int val){
+char* str(off_t val){
     if(val==0)
         return "0\0";
 	static char buf[32] = {0};
@@ -41,7 +43,7 @@ short str_is_digit(char* chr) {
 enum method { GET, HEAD, OTHER };
 
 
-int parse_request(char *buffer, enum method *method, char* path, FILE** fp) {
+int parse_request(char *buffer, enum method *method, char* path, int* fp) {
 
     char base_path[] = "html";
     char default_path[] = "index.html";
@@ -128,18 +130,23 @@ int parse_request(char *buffer, enum method *method, char* path, FILE** fp) {
     printf("Request: %s\n", uri);
 
     // Try to get the resource
-    *fp = fopen(path, "r");
-    if(!*fp) {
+    *fp = open(path, O_RDONLY);
+    struct stat statusbuffer;
+    fstat(*fp, &statusbuffer);
+    if(*fp<0 || S_ISDIR(statusbuffer.st_mode)) {
         perror("can't open file");
         errno = 0;
 
         strcpy(path, base_path);
         strcat(path, path_404);
-        *fp = fopen(path, "r");
+        *fp = open(path, O_RDONLY);
         if(!*fp)
             return 500; // can't find 404.html, which should not happen
         return 404;
     }
+
+
+
 
     return 200;
 
@@ -150,30 +157,27 @@ int service_client_socket (const int s, const char *const tag) {
     char buffer[buffer_size];
     size_t bytes;
 
-
     printf("new connection from %s\n", tag);
 
     // repeatedly read a buffer load of bytes
     while ((bytes = read(s, buffer, buffer_size)) > 0) {
 
-
-#if (__SIZE_WIDTH__ == 64 || __SIZEOF_POINTER__ == 8)
+        #if (__SIZE_WIDTH__ == 64 || __SIZEOF_POINTER__ == 8)
         //printf("Got %ld bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
         //printf ("Got %ld bytes from %s.\n", bytes, tag);
-#else
+        #else
         //printf ("Got %d bytes from %s.\n", bytes, tag);
         //printf ("Got %d bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
-#endif
+        #endif
 
 
         char path[max_path_size] = "\0";
         enum method method = OTHER;
-        FILE *fp;
+        int fp;
 
         int code = parse_request(buffer, &method, path, &fp);
 
         // Prepare response
-        char message_body[buffer_size] = "\0";
         char read_line[buffer_size];
         char response[buffer_size];
 
@@ -211,26 +215,37 @@ int service_client_socket (const int s, const char *const tag) {
 
         }
 
+        //if(path[strlen(path)-1]=='o')
+            //strcat(response, "Content-Type: image/x-icon\n");
+        if(path[strlen(path)-1]=='t')
+            strcat(response, "Content-Type: text/plain\n");
         strcat(response, "Content-Length: ");
+        off_t length = 0;
 
-        if (method == GET)
-            while (fgets(read_line, buffer_size, fp)) {
-                strcat(message_body, read_line);
+        if (method == GET) {
+
+
+            length = lseek(fp, 0, SEEK_END);
+            lseek(fp, 0, SEEK_SET);
+
+            strcat(response, str(length));
+            strcat(response, "\n\n");
+
+            //printf("Content-length: %s\n", str(length));
+
+            if (write(s, response, strlen(response)) != strlen(response)) {
+                perror("write");
+                return -1;
             }
 
-        //if(fp!=NULL)
-        //    fclose(fp);
+            while((length = read(fp, read_line, buffer_size))>0) {
+                if(write(s, read_line, length) != length) {
+                    perror("write");
+                    return -1;
+                }
+            }
 
-        // Append content-length value to the header
-        strcat(response, str((int)strlen(message_body)));
-        strcat(response, "\n\n");
 
-        // Append message body to the response
-        strcat(response, message_body);
-
-        if (write(s, response, strlen(response)) != strlen(response)) {
-            perror("write");
-            return -1;
         }
         
 
