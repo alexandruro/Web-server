@@ -42,12 +42,21 @@ short str_is_digit(char* chr) {
 
 enum method { GET, HEAD, OTHER };
 
+struct options {
+    off_t length;
+    short range;
+    long int1, int2;
+};
 
-int parse_request(char *buffer, enum method *method, char* path, int* fp) {
+
+int parse_request(char *buffer, enum method *method, char* path, int* fp, struct options *opt) {
 
     char base_path[] = "html";
     char default_path[] = "index.html";
     char path_404[] = "/404.html";
+
+    opt->range = 0;
+    opt->length = 0;
 
     // Split the request into lines
     char *line, *saveptrline;
@@ -66,6 +75,31 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp) {
                 if (word_count >= 3)
                     return 400;
                 else first_line[word_count] = word;
+            }
+                // check headers
+            else if(word_count==0) {
+                if(strcmp(word, "Range:")==0) {
+                    word = strtok_r(NULL, " ",&saveptrword);
+                    word_count++;
+                    if(word==NULL)
+                        return 400;
+                    if(strncmp(word, "bytes=", 6)==0) {
+                        char *dash = strchr(word, '-');
+                        if (!dash)
+                            return 400;
+                        char digit1[20], digit2[20];
+                        strncpy(digit1, word + 6, dash - word - 6);
+                        char *end = digit1 + (dash - word - 6);
+                        *end = '\0';
+                        strcpy(digit2, dash + 1);
+                        if (!str_is_digit(digit1) || !str_is_digit(digit2))
+                            return 400;
+                        opt->int1 = strtol(digit1, NULL, 10);
+                        opt->int2 = strtol(digit2, NULL, 10);
+                        opt->range = 1;
+                    }
+                }
+
             }
 
             word = strtok_r(NULL, " ",&saveptrword);
@@ -146,10 +180,14 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp) {
     }
 
 
+    opt->length = lseek(*fp, 0, SEEK_END);
+    lseek(*fp, 0, SEEK_SET);
 
-
-    return 200;
-
+    if(opt->range==1)
+        if(opt->int1<0 || opt->int2<0 || opt->int1>opt->int2 || opt->int2>opt->length)
+            return 416;
+        else return 206;
+    else return 200;
 }
 
 int service_client_socket (const int s, const char *const tag) {
@@ -174,8 +212,9 @@ int service_client_socket (const int s, const char *const tag) {
         char path[max_path_size] = "\0";
         enum method method = OTHER;
         int fp;
+        struct options opt;
 
-        int code = parse_request(buffer, &method, path, &fp);
+        int code = parse_request(buffer, &method, path, &fp, &opt);
 
         // Prepare response
         char read_line[buffer_size];
@@ -188,7 +227,17 @@ int service_client_socket (const int s, const char *const tag) {
                 strcpy(response, "HTTP/1.1 200 OK\n"
                         //"Content-Type: text/html\n"
                         //"Connection: close\n"
-                        );
+                        "Accept-Ranges: bytes\n");
+                break;
+            case 206:
+                strcpy(response, "HTTP/1.1 206 Partial Content\n"
+                        "Content-Range: bytes ");
+                strcat(response, str(opt.int1));
+                strcat(response, "-");
+                strcat(response, str(opt.int2));
+                strcat(response, "/");
+                strcat(response, str(opt.length));
+                strcat(response, "\n");
                 break;
             case 400:
                 strcpy(response, "HTTP/1.1 400 Bad Request\n");
@@ -198,6 +247,9 @@ int service_client_socket (const int s, const char *const tag) {
                         //"Connection: close\n"
                         //"Content-Type: text/html\n"
                         );
+                break;
+            case 416:
+                strcpy(response, "HTTP/1.1 416 Range Not Satisfiable\n");
                 break;
             case 500:
                 strcpy(response, "HTTP/1.1 500 Internal Server Error\n");
@@ -215,29 +267,44 @@ int service_client_socket (const int s, const char *const tag) {
 
         }
 
-        //if(path[strlen(path)-1]=='o')
-            //strcat(response, "Content-Type: image/x-icon\n");
-        if(path[strlen(path)-1]=='t')
-            strcat(response, "Content-Type: text/plain\n");
         strcat(response, "Content-Length: ");
-        off_t length = 0;
 
-        if (method == GET) {
-
-
-            length = lseek(fp, 0, SEEK_END);
-            lseek(fp, 0, SEEK_SET);
-
-            strcat(response, str(length));
+        if(code==206) {
+            lseek(fp, opt.int1, SEEK_SET);
+            long length;
+            long remaining = opt.int2-opt.int1+1;
+            strcat(response, str(remaining));
             strcat(response, "\n\n");
 
-            //printf("Content-length: %s\n", str(length));
+            if (write(s, response, strlen(response)) != strlen(response)) {
+                perror("write");
+                return -1;
+            }
+            printf("Response: %s\n", response);
+
+            while(remaining>0 && (length = read(fp, read_line, buffer_size))>0) {
+                if(length>remaining)
+                    length = remaining;
+                if (write(s, read_line, length) != length) {
+                    perror("write");
+                    return -1;
+                }
+                remaining -= length;
+            }
+        }
+        else
+
+        if ((code==200 || code==400) && method == GET) {
+
+            strcat(response, str(opt.length));
+            strcat(response, "\n\n");
 
             if (write(s, response, strlen(response)) != strlen(response)) {
                 perror("write");
                 return -1;
             }
 
+            int  length;
             while((length = read(fp, read_line, buffer_size))>0) {
                 if(write(s, read_line, length) != length) {
                     perror("write");
@@ -246,6 +313,13 @@ int service_client_socket (const int s, const char *const tag) {
             }
 
 
+        }
+        else {
+            strcat(response, "0\n\n");
+            if (write(s, response, strlen(response)) != strlen(response)) {
+                perror("write");
+                return -1;
+            }
         }
         
 
