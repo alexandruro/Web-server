@@ -19,7 +19,8 @@
 #include "service_client_socket.h"
 
 #define buffer_size 1024
-#define max_path_size 200
+#define max_path_size 2049
+#define request_buffer_size 8193
 
 char* str(off_t val){
     if(val==0)
@@ -67,7 +68,7 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
     {
 
         // Split the line into words
-        char *word="\0", *saveptrword="\0";
+        char *word, *saveptrword="\0";
         word = strtok_r(line," ",&saveptrword);
         int word_count = 0;
         while (word!=NULL) {
@@ -151,6 +152,8 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
 
     // parse Request-URI
     char *uri = first_line[1];
+    if (strlen(uri)>=max_path_size)
+        return 414;
     if (uri[0] != '/') // Request must start with '/'
         return 400;
     if (uri[strlen(uri) - 1] == '/') { // look for index.html in the specified folder
@@ -176,6 +179,8 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
         *fp = open(path, O_RDONLY);
         if(!*fp)
             return 500; // can't find 404.html, which should not happen
+        opt->length = lseek(*fp, 0, SEEK_END);
+        lseek(*fp, 0, SEEK_SET);
         return 404;
     }
 
@@ -192,13 +197,13 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
 
 int service_client_socket (const int s, const char *const tag) {
 
-    char buffer[buffer_size];
+    char buffer[request_buffer_size];
     size_t bytes;
 
     printf("new connection from %s\n", tag);
 
     // repeatedly read a buffer load of bytes
-    while ((bytes = read(s, buffer, buffer_size)) > 0) {
+    if ((bytes = read(s, buffer, request_buffer_size-1)) > 0) {
 
         #if (__SIZE_WIDTH__ == 64 || __SIZEOF_POINTER__ == 8)
         //printf("Got %ld bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
@@ -208,13 +213,16 @@ int service_client_socket (const int s, const char *const tag) {
         //printf ("Got %d bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
         #endif
 
-
         char path[max_path_size] = "\0";
         enum method method = OTHER;
         int fp;
         struct options opt;
+        int code;
 
-        int code = parse_request(buffer, &method, path, &fp, &opt);
+        buffer[bytes] = '\0';
+        if(bytes == request_buffer_size-1)
+            code = 413;
+        else code = parse_request(buffer, &method, path, &fp, &opt);
 
         // Prepare response
         char read_line[buffer_size];
@@ -247,6 +255,12 @@ int service_client_socket (const int s, const char *const tag) {
                         //"Connection: close\n"
                         //"Content-Type: text/html\n"
                         );
+                break;
+            case 413:
+                strcpy(response, "HTTP/1.1 413 Request Entity Too Large\n");
+                break;
+            case 414:
+                strcpy(response, "HTTP/1.1 414 Request-URI Too Long\n");
                 break;
             case 416:
                 strcpy(response, "HTTP/1.1 416 Range Not Satisfiable\n");
@@ -294,7 +308,7 @@ int service_client_socket (const int s, const char *const tag) {
         }
         else
 
-        if ((code==200 || code==400) && method == GET) {
+        if ((code==200 || code==404) && method == GET) {
 
             strcat(response, str(opt.length));
             strcat(response, "\n\n");
@@ -321,15 +335,9 @@ int service_client_socket (const int s, const char *const tag) {
                 return -1;
             }
         }
-        
 
     }
 
-    /* bytes == 0: orderly close; bytes < 0: something went wrong */
-    if (bytes != 0) {
-        perror("read");
-        return -1;
-    }
     printf("connection from %s closed\n", tag);
     close(s);
     return 0;
