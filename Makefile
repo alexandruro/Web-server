@@ -17,7 +17,7 @@ else
 	CC=cc
 endif
 
-BIN=single_thread_server multi_thread_server client
+BIN=single_thread_server multi_thread_server
 
 common_objs=main.o get_listen_socket.o service_client_socket.o \
 	make_printable_address.o
@@ -31,9 +31,6 @@ all_objs=${common_objs} ${single_objs} ${multi_objs}
 
 all: ${BIN}
 
-client: client.c
-	$(CC) $(CFLAGS) -o $@ $+ $(LIBS)
-
 single_thread_server: ${common_objs} ${single_objs}
 	${CC} -o $@ ${CFLAGS} $+ ${LIBS}
 
@@ -41,20 +38,4 @@ multi_thread_server: ${common_objs} ${multi_objs}
 	${CC} -o $@ ${CFLAGS} $+ ${LIBS} 
 
 clean:
-	rm -f ${common_objs} ${BIN} ${single_objs} ${multi_objs} $(ZIP) *~
-
-zip: $(ZIP)
-
-$(ZIP):
-	zip --must-match $(ZIP) *.c  *.h Makefile README
-
-# don't use this rule unless you understand exactly what it is doing
-
-rsync:
-	for host in $(hosts); do rsync ${RSYNC_FLAGS} -avFF . $$host:socket; done
-
-gitupdate:
-	git add .
-	git commit
-	git push
-
+	rm -f ${common_objs} ${BIN} ${single_objs} ${multi_objs} *~
