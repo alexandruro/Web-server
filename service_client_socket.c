@@ -65,12 +65,13 @@ int parse_request(char *buffer, struct request *req) {
 
     char* first_line[3];
 
+    short has_host = 0;
+
     // Split the request into lines
     char *line, *saveptrline;
     int line_count=0;
     line = strtok_r(buffer,"\r\n",&saveptrline);
     while (line!=NULL) {
-
         // Split the line into words and save the request-line words for later
         char *word, *saveptrword="\0";
         word = strtok_r(line," ",&saveptrword);
@@ -85,14 +86,14 @@ int parse_request(char *buffer, struct request *req) {
                 // check headers
             else if(word_count==0) {
                 // Check for the range header
-                if(strcmp(word, "Range:")==0) {
+                if (strcmp(word, "Range:") == 0) {
                     // Get the header value
-                    word = strtok_r(NULL, " ",&saveptrword);
+                    word = strtok_r(NULL, " ", &saveptrword);
                     word_count++;
-                    if(word==NULL)
+                    if (word == NULL)
                         return 400;
                     // Check if it is valid. If it is, put the range in the request struct
-                    if(strncmp(word, "bytes=", 6)==0) {
+                    if (strncmp(word, "bytes=", 6) == 0) {
                         char *dash = strchr(word, '-');
                         if (!dash)
                             return 400;
@@ -109,7 +110,8 @@ int parse_request(char *buffer, struct request *req) {
                             req->range = 1;
                         }
                     }
-                }
+                } else if (strcmp(word, "Host:") == 0)
+                    has_host = 1;
             }
 
             word = strtok_r(NULL, " ",&saveptrword);
@@ -123,6 +125,10 @@ int parse_request(char *buffer, struct request *req) {
         line = strtok_r(NULL, "\r\n", &saveptrline);
         line_count++;
     }
+
+    // Request must have host header
+    if(has_host==0)
+        return 400;
 
     // parse Request-line
 
