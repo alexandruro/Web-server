@@ -2,17 +2,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
-#include <sys/types.h>
 
 #include <memory.h>
-#include <string.h>
 
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 
-#include <assert.h>
 #include <ctype.h>
 #include <sys/fcntl.h>
 
@@ -21,6 +15,10 @@
 #define buffer_size 1024
 #define max_path_size 2049
 #define request_buffer_size 8193
+
+#define base_path "html"
+#define default_path "index.html"
+#define path_404 "/404.html"
 
 char* str(off_t val){
     if(val==0)
@@ -49,12 +47,7 @@ struct options {
     long int1, int2;
 };
 
-
 int parse_request(char *buffer, enum method *method, char* path, int* fp, struct options *opt) {
-
-    char base_path[] = "html";
-    char default_path[] = "index.html";
-    char path_404[] = "/404.html";
 
     opt->range = 0;
     opt->length = 0;
@@ -88,16 +81,18 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
                         char *dash = strchr(word, '-');
                         if (!dash)
                             return 400;
-                        char digit1[20], digit2[20];
-                        strncpy(digit1, word + 6, dash - word - 6);
-                        char *end = digit1 + (dash - word - 6);
-                        *end = '\0';
-                        strcpy(digit2, dash + 1);
-                        if (!str_is_digit(digit1) || !str_is_digit(digit2))
-                            return 400;
-                        opt->int1 = strtol(digit1, NULL, 10);
-                        opt->int2 = strtol(digit2, NULL, 10);
-                        opt->range = 1;
+                        if (dash - word - 6 < 20 && strlen(dash + 1) < 20) {
+                            char digit1[20], digit2[20];
+                            strncpy(digit1, word + 6, dash - word - 6);
+                            char *end = digit1 + (dash - word - 6);
+                            *end = '\0';
+                            strcpy(digit2, dash + 1);
+                            if (!str_is_digit(digit1) || !str_is_digit(digit2))
+                                return 400;
+                            opt->int1 = strtol(digit1, NULL, 10);
+                            opt->int2 = strtol(digit2, NULL, 10);
+                            opt->range = 1;
+                        }
                     }
                 }
 
@@ -129,7 +124,7 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
         strncpy(digit1, version+ 5, dot - version - 5);
         char *end = digit1 + (dot - version - 5);
         *end = '\0';
-        strcpy(digit2, dot + 1);
+        strncpy(digit2, dot + 1, 4);
         if (!str_is_digit(digit1) || !str_is_digit(digit2))
             return 400;
 
@@ -152,7 +147,7 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
 
     // parse Request-URI
     char *uri = first_line[1];
-    if (strlen(uri)>=max_path_size)
+    if (strlen(uri)>=max_path_size-strlen(base_path-strlen(default_path)))
         return 414;
     if (uri[0] != '/') // Request must start with '/'
         return 400;

@@ -39,11 +39,6 @@ $ wget localhost:4444
 
 * If you are using Solaris, you need to use gmake, as it uses some of the GNU extensions, notably $+.
 
-### Things left to do:
-
-- Illegal or incomprehensible URLs should be flagged and rejected with an appropriate error,
-- The program should handle arbitrary-length inputs correctly. (use https://stackoverflow.com/questions/238603/how-can-i-get-a-files-size-in-cfor long files)
-
 Extensions:
 - compression
 - encryption with SSL
