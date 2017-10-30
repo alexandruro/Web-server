@@ -20,6 +20,7 @@
 #define default_path "index.html"
 #define path_404 "/404.html"
 
+// Transforms an int into a string
 char* str(off_t val){
     if(val==0)
         return "0\0";
@@ -31,6 +32,7 @@ char* str(off_t val){
 	return &buf[i+1];
 }
 
+// Checks if a string is a number
 short str_is_digit(char* chr) {
     int i;
     for (i = 0; i < strlen(chr); i++)
@@ -41,30 +43,40 @@ short str_is_digit(char* chr) {
 
 enum method { GET, HEAD, OTHER };
 
-struct options {
-    off_t length;
+// Request information
+struct request {
+    enum method method;
+    off_t file_length;
+    char path[max_path_size];
+    int fp;
+
+    // for byte ranges
     short range;
     long int1, int2;
 };
 
-int parse_request(char *buffer, enum method *method, char* path, int* fp, struct options *opt) {
+// Parses the request. Returns the status code and puts information into the request struct
+int parse_request(char *buffer, struct request *req) {
 
-    opt->range = 0;
-    opt->length = 0;
+    // Initialise the request information
+    req->range = 0;
+    req->file_length = 0;
+    req->method = OTHER;
+
+    char* first_line[3];
 
     // Split the request into lines
     char *line, *saveptrline;
-    line = strtok_r(buffer,"\r\n",&saveptrline);
     int line_count=0;
-    char* first_line[3];
-    while (line!=NULL)
-    {
+    line = strtok_r(buffer,"\r\n",&saveptrline);
+    while (line!=NULL) {
 
-        // Split the line into words
+        // Split the line into words and save the request-line words for later
         char *word, *saveptrword="\0";
         word = strtok_r(line," ",&saveptrword);
         int word_count = 0;
         while (word!=NULL) {
+            // Request-line should have no more than 3 words
             if(line_count==0) {
                 if (word_count >= 3)
                     return 400;
@@ -72,11 +84,14 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
             }
                 // check headers
             else if(word_count==0) {
+                // Check for the range header
                 if(strcmp(word, "Range:")==0) {
+                    // Get the header value
                     word = strtok_r(NULL, " ",&saveptrword);
                     word_count++;
                     if(word==NULL)
                         return 400;
+                    // Check if it is valid. If it is, put the range in the request struct
                     if(strncmp(word, "bytes=", 6)==0) {
                         char *dash = strchr(word, '-');
                         if (!dash)
@@ -89,20 +104,19 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
                             strcpy(digit2, dash + 1);
                             if (!str_is_digit(digit1) || !str_is_digit(digit2))
                                 return 400;
-                            opt->int1 = strtol(digit1, NULL, 10);
-                            opt->int2 = strtol(digit2, NULL, 10);
-                            opt->range = 1;
+                            req->int1 = strtol(digit1, NULL, 10);
+                            req->int2 = strtol(digit2, NULL, 10);
+                            req->range = 1;
                         }
                     }
                 }
-
             }
 
             word = strtok_r(NULL, " ",&saveptrword);
             word_count++;
-
         }
 
+        // Request-line must have 3 words
         if(line_count==0 && word_count!=3)
             return 400;
 
@@ -119,7 +133,6 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
         char *dot = strchr(version, '.');
         if (!dot)
             return 400;
-
         char digit1[5], digit2[5];
         strncpy(digit1, version+ 5, dot - version - 5);
         char *end = digit1 + (dot - version - 5);
@@ -137,54 +150,56 @@ int parse_request(char *buffer, enum method *method, char* path, int* fp, struct
     // parse method
     char* meth = first_line[0];
     if (!strcmp(meth,"GET"))
-        *method = GET;
+        req->method = GET;
     else if (!strcmp(meth,"HEAD"))
-        *method = HEAD;
+        req->method = HEAD;
     else {
-        *method = OTHER;
+        req->method = OTHER;
         return 501; // Not Implemented
     }
 
     // parse Request-URI
     char *uri = first_line[1];
-    if (strlen(uri)>=max_path_size-strlen(base_path-strlen(default_path)))
+    if (strlen(uri)>=max_path_size-strlen(base_path)-strlen(default_path))
         return 414;
     if (uri[0] != '/') // Request must start with '/'
         return 400;
     if (uri[strlen(uri) - 1] == '/') { // look for index.html in the specified folder
-        strcpy(path, base_path);
-        strcat(path, uri);
-        strcat(path, default_path);
+        strcpy(req->path, base_path);
+        strcat(req->path, uri);
+        strcat(req->path, default_path);
     } else { // look for file
-        strcpy(path, base_path);
-        strcat(path, uri);
+        strcpy(req->path, base_path);
+        strcat(req->path, uri);
     }
     printf("Request: %s\n", uri);
 
     // Try to get the resource
-    *fp = open(path, O_RDONLY);
+    req->fp = open(req->path, O_RDONLY);
     struct stat statusbuffer;
-    fstat(*fp, &statusbuffer);
-    if(*fp<0 || S_ISDIR(statusbuffer.st_mode)) {
+    fstat(req->fp, &statusbuffer);
+    // if the resource can't be found or is not a file, get the 404.html instead
+    if(req->fp<0 || S_ISDIR(statusbuffer.st_mode)) {
         perror("can't open file");
         errno = 0;
 
-        strcpy(path, base_path);
-        strcat(path, path_404);
-        *fp = open(path, O_RDONLY);
-        if(!*fp)
+        strcpy(req->path, base_path);
+        strcat(req->path, path_404);
+        req->fp = open(req->path, O_RDONLY);
+        if(!req->fp)
             return 500; // can't find 404.html, which should not happen
-        opt->length = lseek(*fp, 0, SEEK_END);
-        lseek(*fp, 0, SEEK_SET);
+        req->file_length = lseek(req->fp, 0, SEEK_END);
+        lseek(req->fp, 0, SEEK_SET);
         return 404;
     }
 
+    // Put the length of the file in the request struct
+    req->file_length = lseek(req->fp, 0, SEEK_END);
+    lseek(req->fp, 0, SEEK_SET);
 
-    opt->length = lseek(*fp, 0, SEEK_END);
-    lseek(*fp, 0, SEEK_SET);
-
-    if(opt->range==1)
-        if(opt->int1<0 || opt->int2<0 || opt->int1>opt->int2 || opt->int2>opt->length)
+    // If getting a byte range, check if the range is valid
+    if(req->range==1)
+        if(req->int1<0 || req->int2<0 || req->int1>req->int2 || req->int2>req->file_length)
             return 416;
         else return 206;
     else return 200;
@@ -195,9 +210,9 @@ int service_client_socket (const int s, const char *const tag) {
     char buffer[request_buffer_size];
     size_t bytes;
 
-    printf("new connection from %s\n", tag);
+    printf("New connection from %s\n", tag);
 
-    // repeatedly read a buffer load of bytes
+    // Read the request
     if ((bytes = read(s, buffer, request_buffer_size-1)) > 0) {
 
         #if (__SIZE_WIDTH__ == 64 || __SIZEOF_POINTER__ == 8)
@@ -208,48 +223,49 @@ int service_client_socket (const int s, const char *const tag) {
         //printf ("Got %d bytes from %s:\n\"%s\"\n", bytes, tag, buffer);
         #endif
 
-        char path[max_path_size] = "\0";
-        enum method method = OTHER;
-        int fp;
-        struct options opt;
+        struct request req;
         int code;
 
+        // If all the bytes were read, it means the request is too large
+        // (there might be more to be read)
         buffer[bytes] = '\0';
         if(bytes == request_buffer_size-1)
             code = 413;
-        else code = parse_request(buffer, &method, path, &fp, &opt);
+        else code = parse_request(buffer, &req);
 
         // Prepare response
         char read_line[buffer_size];
         char response[buffer_size];
 
+        // Prepare status-line and headers
+        long content_length = 0;
         switch (code) {
-
             case 200:
-                // Prepare status-line and headers
                 strcpy(response, "HTTP/1.1 200 OK\n"
-                        //"Content-Type: text/html\n"
-                        //"Connection: close\n"
                         "Accept-Ranges: bytes\n");
+                content_length = req.file_length;
                 break;
             case 206:
                 strcpy(response, "HTTP/1.1 206 Partial Content\n"
+                        "Accept-Ranges: bytes\n"
                         "Content-Range: bytes ");
-                strcat(response, str(opt.int1));
+                strcat(response, str(req.int1));
                 strcat(response, "-");
-                strcat(response, str(opt.int2));
+                strcat(response, str(req.int2));
                 strcat(response, "/");
-                strcat(response, str(opt.length));
+                strcat(response, str(req.file_length));
                 strcat(response, "\n");
+
+                // Get content-length
+                content_length = req.int2-req.int1+1;
+
                 break;
             case 400:
                 strcpy(response, "HTTP/1.1 400 Bad Request\n");
                 break;
             case 404:
-                strcpy(response, "HTTP/1.1 404 Not Found\n"
-                        //"Connection: close\n"
-                        //"Content-Type: text/html\n"
-                        );
+                strcpy(response, "HTTP/1.1 404 Not Found\n");
+                content_length = req.file_length;
                 break;
             case 413:
                 strcpy(response, "HTTP/1.1 413 Request Entity Too Large\n");
@@ -269,73 +285,51 @@ int service_client_socket (const int s, const char *const tag) {
             case 505:
                 strcpy(response, "HTTP/1.1 505 HTTP Version Not Supported\n");
                 break;
-
             default:
-                printf("%d\n", code);
+                printf("Server error.\n");
                 return -1;
-
         }
 
+        // Add content-length
         strcat(response, "Content-Length: ");
+        if(req.method==GET)
+            strcat(response, str(content_length));
+        else strcat(response, "0");
+        strcat(response, "\n\n");
 
-        if(code==206) {
-            lseek(fp, opt.int1, SEEK_SET);
-            long length;
-            long remaining = opt.int2-opt.int1+1;
-            strcat(response, str(remaining));
-            strcat(response, "\n\n");
-
-            if (write(s, response, strlen(response)) != strlen(response)) {
-                perror("write");
-                return -1;
-            }
-            printf("Response: %s\n", response);
-
-            while(remaining>0 && (length = read(fp, read_line, buffer_size))>0) {
-                if(length>remaining)
-                    length = remaining;
-                if (write(s, read_line, length) != length) {
-                    perror("write");
-                    return -1;
-                }
-                remaining -= length;
-            }
+        // Send status line and headers
+        if (write(s, response, strlen(response)) != strlen(response)) {
+            perror("write");
+            return -1;
         }
-        else
 
-        if ((code==200 || code==404) && method == GET) {
-
-            strcat(response, str(opt.length));
-            strcat(response, "\n\n");
-
-            if (write(s, response, strlen(response)) != strlen(response)) {
-                perror("write");
-                return -1;
-            }
-
-            int  length;
-            while((length = read(fp, read_line, buffer_size))>0) {
-                if(write(s, read_line, length) != length) {
-                    perror("write");
-                    return -1;
+        // Send the file if applicable
+        if(req.method==GET) {
+            if (code == 206) {
+                // Send the byte range
+                lseek(req.fp, req.int1, SEEK_SET);
+                while (content_length > 0 && (bytes = read(req.fp, read_line, buffer_size)) > 0) {
+                    if (bytes > content_length)
+                        bytes = content_length;
+                    if (write(s, read_line, (size_t) bytes) != bytes) {
+                        perror("write");
+                        return -1;
+                    }
+                    content_length -= bytes;
+                }
+            } else if (code == 200 || code == 404) {
+                // Send the whole file
+                while ((bytes = read(req.fp, read_line, buffer_size)) > 0) {
+                    if (write(s, read_line, (size_t) bytes) != bytes) {
+                        perror("write");
+                        return -1;
+                    }
                 }
             }
-
-
         }
-        else {
-            strcat(response, "0\n\n");
-            if (write(s, response, strlen(response)) != strlen(response)) {
-                perror("write");
-                return -1;
-            }
-        }
-
     }
 
     printf("connection from %s closed\n", tag);
     close(s);
     return 0;
-
 }
-
